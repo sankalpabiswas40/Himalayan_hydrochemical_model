@@ -1,5 +1,5 @@
 # Himalayan_hydrochemical_model
-# 🏔️ Himalayan HydroGeochem Predictor
+# Himalayan HydroGeochem Predictor
 
 **A 2D Spatial Prediction Model for Trace Element Kinetics in the Alaknanda-Ganga Basin**
 
@@ -12,7 +12,7 @@ This project was developed during the prestigious **IASc-INSA-NASI Summer Resear
 
 ---
 
-## 🔬 Mathematical Methodology: The V3 Model
+##  Mathematical Methodology: The V3 Model
 
 The core of the prediction engine relies on the V3 Log-Additive Model. For any given trace element $e$ at coordinates $(\phi, \lambda)$, the predicted concentration is defined as:
 
@@ -29,7 +29,7 @@ The interactive UI allows researchers to adjust the weights ($W_1 \ldots W_4$) i
 
 ---
 
-## ⚠️ Limitations & Uncertainties
+##  Limitations & Uncertainties
 
 As with any spatial model, transparency regarding uncertainties is critical:
 1. **Data Sparsity:** The current baseline relies on highly localized hard-points (e.g., Chakrapani 2005) and synthetic datasets. True basin-wide accuracy requires dense, empirical sampling across the upper catchment. 
@@ -38,7 +38,7 @@ As with any spatial model, transparency regarding uncertainties is critical:
 
 ---
 
-## 🚀 Future Scope
+##  Future Scope
 
 - **Machine Learning Integration:** Transitioning the static IDW baseline to a Random Forest or XGBoost model trained on comprehensive hydrochemical survey data.
 - **Real-Time API Telemetry:** Integrating live data feeds from CWC (Central Water Commission) discharge gauges to dynamically update velocity and turbidity parameters.
@@ -46,13 +46,13 @@ As with any spatial model, transparency regarding uncertainties is critical:
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 - **Frontend:** HTML5, CSS3 (Glassmorphism UI), Vanilla JavaScript
 - **Geospatial Engine:** Leaflet.js (CartoDB Positron tiles)
 - **Spatial Topology:** Turf.js (Point-in-Polygon lithology resolution)
 - **Data:** GeoJSON (River networks, Geological boundaries)
 
-## 🤝 Acknowledgements
+##  Acknowledgements
 - **Project Developer:** Sankalpa Biswas (IASc-INSA-NASI SRFP Fellow).
 - **Conceptualization & Mentorship:** Deepest gratitude to **Dr. Gyana Ranjan Tripathy** for providing the core idea and continuous guidance throughout this project.
 - **Host Institution:** **IISER Pune** for hosting the fellowship and providing critical informational resources.
