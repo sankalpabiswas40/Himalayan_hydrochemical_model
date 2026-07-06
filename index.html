@@ -1313,6 +1313,31 @@
   /* ===========================================================
    *  BOOT
    * =========================================================== */
+  function autoLoadDefaultData() {
+    showLoading(true);
+    showStatus('info', 'Auto-loading default datasets...');
+    
+    // Fetch river network
+    fetch('alaknanda_v3_ready.geojson')
+      .then(function(res) { return res.ok ? res.text() : Promise.reject('Failed to load GeoJSON'); })
+      .then(function(text) { 
+        loadGeoJSON(text); 
+        // Then fetch CSV samples
+        return fetch('groundwater_samples.csv');
+      })
+      .then(function(res) { return res.ok ? res.text() : Promise.reject('Failed to load CSV'); })
+      .then(function(text) {
+        parseCSV(text);
+        showLoading(false);
+        showStatus('success', 'Model initialized with default dataset.');
+      })
+      .catch(function(err) {
+        console.warn('Auto-load skipped or failed:', err);
+        showLoading(false);
+        showStatus('info', 'Ready. Please upload GeoJSON and CSV data.');
+      });
+  }
+
   window.addEventListener('DOMContentLoaded', function() {
     initMap();
     bindEvents();
@@ -1320,6 +1345,9 @@
     if(document.getElementById('toggle-geology')) {
       document.getElementById('toggle-geology').addEventListener('change', toggleGeologyLayer);
     }
+
+    // Try to auto-load the local files so visitors don't have to manually upload them
+    autoLoadDefaultData();
 
     // Weight slider live updates
     var wIds = ['w1', 'w2', 'w3', 'w4'];
