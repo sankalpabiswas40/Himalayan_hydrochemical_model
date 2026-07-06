@@ -3,7 +3,7 @@
 
 **A 2D Spatial Prediction Model for Trace Element Kinetics in the Alaknanda-Ganga Basin**
 
-![Live Demo](https://img.shields.io/badge/Live_Demo-Click_Here-blue?style=for-the-badge)
+![Live Demo]([https://img.shields.io/badge/Live_Demo-Click_Here-blue?style=for-the-badge](https://sankalpabiswas40.github.io/Himalayan_hydrochemical_model/))
 
 ## 📖 Abstract
 The Himalayan HydroGeochem Predictor is an interactive, browser-based spatial modeling tool designed to predict trace element concentrations (Fe, Mn, Cu, Pb, Zn, Cr, As, Cd, Ni) across the Alaknanda-Ganga river network and underlying groundwater aquifers. Built for hydrogeologists and environmental scientists, the tool uses a **Log-Additive Kinetic Model** that dynamically scales an Inverse Distance Weighting (IDW) baseline using four localized geochemical parameters: Lithological weathering, Hydraulic residence time, Clay sorption, and Redox potential.
