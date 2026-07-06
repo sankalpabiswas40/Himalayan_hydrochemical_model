@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>River Trace Element Predictor V2</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<style>
+  /* ===== RESET & BASE ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; width: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+
+  /* ===== MAP ===== */
+  #map { position: absolute; inset: 0; z-index: 1; }
+
+  /* ===== SIDEBAR (left) — glassmorphism ===== */
+  #sidebar {
+    position: absolute; top: 0; left: 0; bottom: 0; width: 340px; z-index: 900;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    color: #f8fafc; overflow-y: auto; display: flex; flex-direction: column;
+    scrollbar-width: thin; scrollbar-color: #334155 transparent;
+  }
+  #sidebar::-webkit-scrollbar { width: 6px; }
+  #sidebar::-webkit-scrollbar-track { background: transparent; }
+  #sidebar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+  .sb-header {
+    padding: 20px 18px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(135deg, rgba(56,189,248,0.12), rgba(139,92,246,0.10));
+  }
+  .sb-header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+  .sb-header h1 span { color: #38bdf8; }
+  .sb-header p { font-size: 11px; color: #94a3b8; margin-top: 4px; line-height: 1.4; }
+
+  .sb-section { padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .sb-section-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px;
+    color: #64748b; margin-bottom: 10px;
+  }
+
+  /* ===== FORM CONTROLS ===== */
+  label.field-label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 5px; font-weight: 500; }
+  select, input[type="file"] {
+    width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 13px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: #1e293b; color: #f8fafc;
+    outline: none; transition: border-color 0.2s;
+    appearance: none; -webkit-appearance: none;
+  }
+  select { cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M6 8.5L1 3.5h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px; }
+  select:focus, input[type="file"]:focus { border-color: #38bdf8; }
+  /* FIX: dropdown options styling */
+  select option { background: #1e293b; color: #f8fafc; padding: 6px; }
+
+  .field-row { margin-bottom: 12px; }
+  .field-row:last-child { margin-bottom: 0; }
+
+  /* ===== UPLOAD BOX ===== */
+  .upload-box {
+    border: 2px dashed rgba(56,189,248,0.30); border-radius: 10px;
+    padding: 18px 14px; text-align: center; cursor: pointer;
+    transition: all 0.25s; position: relative; overflow: hidden;
+    background: rgba(56,189,248,0.04);
+  }
+  .upload-box:hover, .upload-box.dragover { border-color: #38bdf8; background: rgba(56,189,248,0.10); }
+  .upload-box .icon { font-size: 28px; margin-bottom: 6px; }
+  .upload-box .label { font-size: 12px; color: #94a3b8; line-height: 1.5; }
+  .upload-box .label b { color: #38bdf8; }
+  .upload-box input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  /* ===== STATUS MESSAGES ===== */
+  .status-msg {
+    padding: 8px 12px; border-radius: 8px; font-size: 12px; margin-top: 10px;
+    display: none; align-items: center; gap: 6px; line-height: 1.4;
+  }
+  .status-msg.success { display: flex; background: rgba(34,197,94,0.12); color: #4ade80; border: 1px solid rgba(34,197,94,0.20); }
+  .status-msg.error { display: flex; background: rgba(239,68,68,0.12); color: #f87171; border: 1px solid rgba(239,68,68,0.20); }
+  .status-msg.info { display: flex; background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.20); }
+
+  /* ===== LOADING SPINNER ===== */
+  #loading-overlay {
+    position: absolute; inset: 0; z-index: 9999;
+    background: rgba(15,23,42,0.70); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+  }
+  #loading-overlay.visible { display: flex; }
+  .spinner { width: 44px; height: 44px; border: 4px solid rgba(56,189,248,0.18); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner-text { color: #cbd5e1; font-size: 13px; }
+
+  /* ===== SAMPLE POINTS LIST ===== */
+  .sample-list { list-style: none; }
+  .sample-list li {
+    padding: 7px 10px; border-radius: 6px; font-size: 12px; color: #cbd5e1;
+    margin-bottom: 4px; background: rgba(255,255,255,0.03); cursor: default;
+    border-left: 3px solid #38bdf8; transition: background 0.15s;
+  }
+  .sample-list li:hover { background: rgba(255,255,255,0.07); }
+  .sample-list li .val { color: #94a3b8; font-size: 11px; }
+
+  /* ===== RIGHT PANELS ===== */
+  .right-panel {
+    position: absolute; right: 14px; z-index: 900; width: 340px;
+    background: rgba(15,23,42,0.92); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+    color: #f8fafc; overflow: hidden; display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.40);
+  }
+  .right-panel.visible { display: block; }
+
+  #segment-panel { top: 14px; }
+  #prediction-panel { top: 14px; max-height: calc(100vh - 28px); overflow-y: auto; }
+  #prediction-panel::-webkit-scrollbar { width: 5px; }
+  #prediction-panel::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+  .rp-header {
+    padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(135deg, rgba(56,189,248,0.08), rgba(139,92,246,0.06));
+  }
+  .rp-header h3 { font-size: 13px; font-weight: 700; }
+  .rp-close { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .rp-close:hover { background: rgba(255,255,255,0.08); color: #f8fafc; }
+
+  .rp-body { padding: 14px 16px; }
+
+  /* Segment properties grid */
+  .prop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .prop-card {
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 10px 12px;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .prop-card .pk { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+  .prop-card .pv { font-size: 14px; font-weight: 600; margin-top: 3px; color: #e2e8f0; }
+
+  /* Element grid */
+  .elem-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .elem-card {
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 10px 8px;
+    text-align: center; border: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .elem-card:hover { background: rgba(255,255,255,0.08); transform: translateY(-1px); }
+  .elem-card.selected { border-color: #38bdf8; background: rgba(56,189,248,0.10); }
+  .elem-card .sym { font-size: 16px; font-weight: 800; }
+  .elem-card .cval { font-size: 11px; margin-top: 3px; font-weight: 600; }
+  .elem-card .unit { font-size: 9px; color: #64748b; }
+  .elem-card.green .sym { color: #4ade80; }
+  .elem-card.yellow .sym { color: #facc15; }
+  .elem-card.orange .sym { color: #fb923c; }
+  .elem-card.red .sym { color: #f87171; }
+
+  /* Location info above element grid */
+  .loc-info { margin-bottom: 10px; }
+  .loc-info .loc-name { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 6px; }
+  .loc-info .loc-meta { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+  .loc-info .loc-meta span { display: inline-block; margin-right: 12px; }
+
+  /* Factor breakdown */
+  .factor-section { margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px; }
+  .factor-toggle {
+    background: none; border: 1px solid rgba(255,255,255,0.08); color: #94a3b8;
+    font-size: 11px; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    width: 100%; text-align: left; transition: all 0.15s;
+  }
+  .factor-toggle:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
+  .factor-toggle .arrow { float: right; transition: transform 0.2s; }
+  .factor-toggle.open .arrow { transform: rotate(180deg); }
+  .factor-list { display: none; margin-top: 8px; }
+  .factor-list.open { display: block; }
+  .factor-row {
+    display: flex; align-items: center; padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03); font-size: 12px;
+  }
+  .factor-row:last-child { border-bottom: none; }
+  .factor-row .fn { flex: 1; color: #cbd5e1; }
+  .factor-row .fv { width: 65px; text-align: right; font-weight: 600; font-family: 'Consolas', monospace; color: #e2e8f0; }
+  .factor-row .fe { width: 28px; text-align: center; font-size: 14px; margin-left: 6px; }
+
+  /* ===== MAP LEGEND ===== */
+  .map-legend {
+    position: absolute; bottom: 30px; left: 360px; z-index: 800;
+    background: rgba(15,23,42,0.90); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+    padding: 12px 16px; color: #f8fafc; display: none;
+  }
+  .map-legend.visible { display: block; }
+  .map-legend h4 { font-size: 11px; color: #94a3b8; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .legend-bar { width: 180px; height: 12px; border-radius: 4px; background: linear-gradient(90deg, #22c55e, #facc15, #fb923c, #ef4444); margin-bottom: 6px; }
+  .legend-labels { display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; }
+
+  /* ===== LEAFLET OVERRIDES ===== */
+  .leaflet-control-attribution { font-size: 10px !important; }
+</style>
+</head>
+<body>
+
+<!-- Map container -->
+<div id="map"></div>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="spinner-text">Processing GeoJSON data…</div>
+</div>
+
+<!-- ===== LEFT SIDEBAR ===== -->
+<div id="sidebar">
+
+  <!-- Header -->
+  <div class="sb-header">
+    <h1>🏔️ River <span>Trace Element</span> Predictor</h1>
+    <p>V2 — Alaknanda–Ganga River System<br>Multi-factor geochemical model (Chakrapani 2005)</p>
+  </div>
+
+  <!-- Element & Season Selection -->
+  <div class="sb-section">
+    <div class="sb-section-title">Model Parameters</div>
+    <div class="field-row">
+      <label class="field-label">Load River Network (V3 GeoJSON)</label>
+      <input type="file" id="geojson-input" accept=".geojson,.json">
+    </div>
+    <div class="field-row">
+      <label class="field-label">Trace Element</label>
+      <select id="sel-element">
+        <option value="Fe">Fe — Iron</option>
+        <option value="Mn">Mn — Manganese</option>
+        <option value="Cu">Cu — Copper</option>
+        <option value="Pb">Pb — Lead</option>
+        <option value="Zn">Zn — Zinc</option>
+        <option value="Cr">Cr — Chromium</option>
+        <option value="As" selected>As — Arsenic</option>
+        <option value="Cd">Cd — Cadmium</option>
+        <option value="Ni">Ni — Nickel</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <label class="field-label">Season</label>
+      <select id="sel-season">
+        <option value="post-monsoon">Post-Monsoon (baseline)</option>
+        <option value="pre-monsoon">Pre-Monsoon (dry)</option>
+        <option value="monsoon">Monsoon (wet)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Custom Sample Data (CSV) -->
+  <div class="sb-section">
+    <div class="sb-section-title">Import Custom Samples</div>
+    <div class="field-row">
+      <label class="field-label">Upload Research Data (CSV)</label>
+      <input type="file" id="csv-input" accept=".csv">
+    </div>
+    <div class="status-msg" id="status-msg"></div>
+    <div class="field-row" style="margin-top: 15px;">
+      <label class="field-label" style="display:flex; align-items:center; cursor:pointer; color:#94a3b8;">
+        <input type="checkbox" id="toggle-geology" style="margin-right: 8px;"> Show Geology Layer
+      </label>
+    </div>
+  </div>
+
+  <!-- Coordinate Lookup -->
+  <div class="sb-section">
+    <div class="sb-section-title">Coordinate Lookup</div>
+    <div class="field-row" style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field-label">Latitude</label>
+        <input type="number" id="lookup-lat" step="0.001" value="30.400" style="width:100%;padding:6px 8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#f8fafc;font-size:13px;">
+      </div>
+      <div style="flex:1;">
+        <label class="field-label">Longitude</label>
+        <input type="number" id="lookup-lng" step="0.001" value="79.200" style="width:100%;padding:6px 8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#f8fafc;font-size:13px;">
+      </div>
+    </div>
+    <div class="field-row" style="margin-top:8px;">
+      <button id="btn-lookup" style="width:100%;padding:8px 12px;background:linear-gradient(135deg,#38bdf8,#8b5cf6);border:none;border-radius:8px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;letter-spacing:0.3px;">🔍 Predict at Coordinates</button>
+    </div>
+  </div>
+
+  <!-- V3 Weight Calibration -->
+  <div class="sb-section">
+    <div class="sb-section-title">V3 Log-Additive Weights</div>
+    
+    <div class="field-row">
+      <label class="field-label" style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+        <span>Lithology (W1)</span> <span id="val-w1">1.0</span>
+      </label>
+      <input type="range" id="w1" min="0" max="2" step="0.1" value="1.0" style="width:100%;">
+    </div>
+
+    <div class="field-row">
+      <label class="field-label" style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+        <span>Hydraulic Residence (W2)</span> <span id="val-w2">1.0</span>
+      </label>
+      <input type="range" id="w2" min="0" max="2" step="0.1" value="1.0" style="width:100%;">
+    </div>
+
+    <div class="field-row">
+      <label class="field-label" style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+        <span>Clay Sorption (W3)</span> <span id="val-w3">1.0</span>
+      </label>
+      <input type="range" id="w3" min="0" max="2" step="0.1" value="1.0" style="width:100%;">
+    </div>
+
+    <div class="field-row">
+      <label class="field-label" style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+        <span>Elevation/Temp (W4)</span> <span id="val-w4">1.0</span>
+      </label>
+      <input type="range" id="w4" min="0" max="2" step="0.1" value="1.0" style="width:100%;">
+    </div>
+  </div>
+
+  <!-- Reference Samples -->
+  <div class="sb-section" style="flex:1;">
+    <div class="sb-section-title">Reference Samples (Chakrapani 2005)</div>
+    <ul class="sample-list" id="sample-list"></ul>
+  </div>
+
+  <!-- Footer -->
+  <div class="sb-section" style="border-bottom:none; padding-bottom:20px;">
+    <p style="font-size:10px;color:#475569;line-height:1.5;">
+      Model: C = C_base × F1…F9 (IDW + 9 geochemical factors).<br>
+      Data: Chakrapani (2005) Alaknanda–Ganga.<br>
+      River network: HydroRIVERS (Lehner et al.)
+    </p>
+  </div>
+</div>
+
+<!-- ===== SEGMENT INFO PANEL (top-right) ===== -->
+<div class="right-panel" id="segment-panel">
+  <div class="rp-header">
+    <h3>📍 Segment Properties</h3>
+    <button class="rp-close" id="seg-close">&times;</button>
+  </div>
+  <div class="rp-body">
+    <div class="prop-grid" id="prop-grid"></div>
+  </div>
+</div>
+
+<!-- ===== PREDICTION PANEL (right, below segment) ===== -->
+<div class="right-panel" id="prediction-panel">
+  <div class="rp-header">
+    <h3>🔬 Prediction Results</h3>
+    <button class="rp-close" id="pred-close">&times;</button>
+  </div>
+  <div class="rp-body">
+    <div class="loc-info" id="loc-info"></div>
+    <div class="sb-section-title" style="color:#64748b;">Predicted Concentrations (µg/L)</div>
+    <div class="elem-grid" id="elem-grid"></div>
+    <div class="factor-section" id="factor-section">
+      <button class="factor-toggle" id="factor-toggle">
+        Factor Breakdown <span class="arrow">▼</span>
+      </button>
+      <div class="factor-list" id="factor-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MAP LEGEND ===== -->
+<div class="map-legend" id="map-legend">
+  <h4 id="legend-title">As Concentration</h4>
+  <div class="legend-bar"></div>
+  <div class="legend-labels">
+    <span>0%</span><span>30%</span><span>70%</span><span>100%+ WHO</span>
+  </div>
+</div>
+
+<!-- ===== ALL JAVASCRIPT ===== -->
+<script>
+(function() {
+  'use strict';
+
+  /* ===========================================================
+   *  CONSTANTS & DATA
+   * =========================================================== */
+  var ELEMENTS = ['Fe','Mn','Cu','Pb','Zn','Cr','As','Cd','Ni'];
+
+  var SAMPLES = [
+    {name:'Alaknanda at Devprayag', lat:30.151, lng:78.601, elev:475, data:{Fe:46200,Mn:180,Cu:1850,Pb:17.4,Zn:4530,Cr:2890,As:6310,Cd:7.27,Ni:1990}},
+    {name:'Bhagirathi at Devprayag', lat:30.149, lng:78.599, elev:475, data:{Fe:42900,Mn:980,Cu:1350,Pb:8.0,Zn:3890,Cr:2250,As:4630,Cd:16.3,Ni:2340}},
+    {name:'Ganga at Rishikesh', lat:30.100, lng:78.300, elev:340, data:{Fe:45500,Mn:90,Cu:1360,Pb:16.0,Zn:5250,Cr:2400,As:4540,Cd:10.0,Ni:1550}}
+  ];
+
+  var MAIN_RIVER = [
+    {name:'Satopanth (Source)',lat:30.7834,lng:79.4386,elev:3880,dist:0,lith:'Gneiss',order:1},
+    {name:'Badrinath',lat:30.7433,lng:79.4931,elev:3100,dist:15,lith:'Gneiss',order:2},
+    {name:'Govindghat',lat:30.63,lng:79.55,elev:1800,dist:45,lith:'Gneiss',order:3},
+    {name:'Joshimath',lat:30.56,lng:79.56,elev:1875,dist:55,lith:'Gneiss',order:3},
+    {name:'Vishnuprayag',lat:30.55,lng:79.52,elev:1372,dist:60,lith:'Quartzite',order:4},
+    {name:'Chamoli',lat:30.40,lng:79.32,elev:1000,dist:90,lith:'Quartzite',order:4},
+    {name:'Nandaprayag',lat:30.33,lng:79.32,elev:870,dist:100,lith:'Phyllite',order:5},
+    {name:'Karnaprayag',lat:30.26,lng:79.15,elev:800,dist:120,lith:'Phyllite',order:6},
+    {name:'Gauchar',lat:30.25,lng:79.10,elev:750,dist:130,lith:'Slate',order:6},
+    {name:'Rudraprayag',lat:30.28,lng:78.98,elev:610,dist:145,lith:'Slate',order:7},
+    {name:'Srinagar',lat:30.22,lng:78.78,elev:560,dist:165,lith:'Quartzite',order:7},
+    {name:'Devprayag',lat:30.15,lng:78.60,elev:475,dist:195,lith:'Limestone',order:10}
+  ];
+
+  var WHO_LIMITS = {Fe:300000,Mn:80000,Cu:2000000,Pb:10000,Zn:3000000,Cr:50000,As:10000,Cd:3000,Ni:70000};
+
+  var LITHOLOGY_TABLE = {
+    Gneiss:     {Fe:1.0,Mn:1.0,Cu:1.0,Pb:1.0,Zn:1.0,Cr:1.0,As:1.0,Cd:1.0,Ni:1.0},
+    Quartzite:  {Fe:0.4,Mn:0.4,Cu:0.3,Pb:0.4,Zn:0.3,Cr:0.4,As:0.3,Cd:0.3,Ni:0.3},
+    Phyllite:   {Fe:0.9,Mn:0.9,Cu:1.0,Pb:1.1,Zn:0.9,Cr:0.9,As:1.0,Cd:1.0,Ni:0.9},
+    Slate:      {Fe:1.1,Mn:1.0,Cu:0.9,Pb:1.0,Zn:1.1,Cr:1.0,As:0.9,Cd:1.0,Ni:1.0},
+    Limestone:  {Fe:0.5,Mn:1.2,Cu:0.4,Pb:0.5,Zn:0.6,Cr:0.3,As:0.5,Cd:0.4,Ni:0.3},
+    Schist:     {Fe:1.2,Mn:1.1,Cu:1.2,Pb:1.1,Zn:1.1,Cr:1.1,As:1.0,Cd:1.1,Ni:1.2},
+    Basalt:     {Fe:1.8,Mn:1.5,Cu:1.5,Pb:0.8,Zn:1.4,Cr:1.8,As:0.8,Cd:1.2,Ni:2.0},
+    Alluvium:   {Fe:1.0,Mn:1.0,Cu:1.0,Pb:1.0,Zn:1.0,Cr:1.0,As:1.0,Cd:1.0,Ni:1.0}
+  };
+
+  var BETA  = {Fe:0.4,Mn:0.2,Cu:0.1,Pb:0.05,Zn:0.1,Cr:0.3,As:0.1,Cd:0.05,Ni:0.15};
+  var GAMMA = {Fe:0.3,Mn:0.2,Cu:0.1,Pb:-0.15,Zn:0.05,Cr:0.25,As:-0.1,Cd:-0.2,Ni:0.1};
+  var KD    = {Fe:0.1,Mn:22.3,Cu:0.41,Pb:1.5,Zn:0.35,Cr:0.15,As:0.54,Cd:0.99,Ni:1.23};
+  var LAMBDA= {Fe:1.0004,Mn:0.972,Cu:0.998,Pb:1.005,Zn:1.004,Cr:0.999,As:0.998,Cd:0.996,Ni:0.996};
+  var REDOX = {Fe:0.85,Mn:0.13,Cu:0.9,Pb:0.95,Zn:0.95,Cr:0.95,As:0.86,Cd:0.98,Ni:0.92};
+
+  var SEASON_FACTORS = {
+    'pre-monsoon':  {Fe:1.0,Mn:1.3,Cu:1.2,Pb:1.3,Zn:1.1,Cr:1.0,As:1.4,Cd:1.5,Ni:1.1},
+    'monsoon':      {Fe:1.8,Mn:0.6,Cu:0.7,Pb:0.8,Zn:0.8,Cr:1.3,As:0.6,Cd:0.5,Ni:0.9},
+    'post-monsoon': {Fe:1.0,Mn:1.0,Cu:1.0,Pb:1.0,Zn:1.0,Cr:1.0,As:1.0,Cd:1.0,Ni:1.0}
+  };
+
+  var FACTOR_NAMES = [
+    'IDW Base (C_base)',
+    'Lithology (W1)',
+    'Hydraulic Res (W2)',
+    'Elevation/Temp (W4)',
+    'Clay Sorption (W3)',
+    'Season (F_sea)',
+    'Transport Loss (F_trans)',
+    'Redox (F_redox)'
+  ];
+
+  /* ===========================================================
+   *  GLOBALS
+   * =========================================================== */
+  var map, geoLayer, sampleMarkers = [], legendEl, geojsonData = null;
+  var selectedSegmentProps = null;
+  var selectedSegmentLatLng = null;
+  var rawGeologyData = null;
+
+  /* ===========================================================
+   *  UTILITY FUNCTIONS
+   * =========================================================== */
+
+  /** Haversine distance in km */
+  function haversine(lat1, lng1, lat2, lng2) {
+    var R = 6371;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLng = (lng2 - lng1) * Math.PI / 180;
+    var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+            Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+            Math.sin(dLng/2)*Math.sin(dLng/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function getIDW(lat, lng, element) {
+    var sumW = 0, sumWV = 0;
+    for (var i = 0; i < SAMPLES.length; i++) {
+      var d = haversine(lat, lng, SAMPLES[i].lat, SAMPLES[i].lng);
+      if (d < 0.01) d = 0.01;
+      var w = 1 / (d * d);
+      sumW += w;
+      sumWV += w * SAMPLES[i].data[element];
+    }
+    return sumWV / sumW;
+  }
+
+  /** Get midpoint of a GeoJSON feature's geometry */
+  function featureMidpoint(feature) {
+    var coords = feature.geometry.coordinates;
+    if (feature.geometry.type === 'MultiLineString') {
+      // flatten
+      var all = [];
+      for (var i = 0; i < coords.length; i++) {
+        for (var j = 0; j < coords[i].length; j++) all.push(coords[i][j]);
+      }
+      coords = all;
+    } else if (feature.geometry.type === 'LineString') {
+      // already flat array of [lng, lat]
+    } else {
+      coords = coords; // try as-is
+    }
+    if (!coords || coords.length === 0) return null;
+    var mid = coords[Math.floor(coords.length / 2)];
+    // GeoJSON is [lng, lat]
+    if (Array.isArray(mid[0])) mid = mid[0]; // safety for nested
+    return { lat: mid[1], lng: mid[0] };
+  }
+
+  /** Find nearest MAIN_RIVER waypoint to a lat/lng */
+  function nearestWaypoint(lat, lng) {
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < MAIN_RIVER.length; i++) {
+      var d = haversine(lat, lng, MAIN_RIVER[i].lat, MAIN_RIVER[i].lng);
+      if (d < bestD) { bestD = d; best = MAIN_RIVER[i]; }
+    }
+    return { waypoint: best, distance: bestD };
+  }
+
+  /** Clamp value between min and max */
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /** Format number nicely */
+  function fmt(n, decimals) {
+    if (n === undefined || n === null || isNaN(n)) return '—';
+    if (decimals === undefined) decimals = 2;
+    if (Math.abs(n) >= 1000) return n.toLocaleString('en-US', {maximumFractionDigits: decimals});
+    return n.toFixed(decimals);
+  }
+
+  /* ===========================================================
+   *  BASIN BOUNDARY & CONFIDENCE
+   * =========================================================== */
+
+  // Simplified Alaknanda-Ganga catchment bounding polygon
+  var BASIN_POLYGON = [
+    [30.90, 78.40], [31.05, 79.00], [30.95, 79.70], [30.75, 79.85],
+    [30.50, 79.75], [30.30, 79.50], [30.15, 79.40], [30.05, 79.10],
+    [29.95, 78.80], [30.00, 78.40], [30.05, 78.20], [30.15, 78.10],
+    [30.30, 78.30], [30.50, 78.35], [30.70, 78.30], [30.90, 78.40]
+  ];
+
+  function isInsideBasin(lat, lng) {
+    // Ray-casting point-in-polygon
+    var inside = false;
+    for (var i = 0, j = BASIN_POLYGON.length - 1; i < BASIN_POLYGON.length; j = i++) {
+      var yi = BASIN_POLYGON[i][0], xi = BASIN_POLYGON[i][1];
+      var yj = BASIN_POLYGON[j][0], xj = BASIN_POLYGON[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function computeConfidence(lat, lng) {
+    if (SAMPLES.length === 0) return { pct: 0, label: 'No Data', color: '#ef4444' };
+
+    // 1. Distance to nearest sample
+    var minDist = Infinity;
+    var countNear = 0; // samples within 30 km
+    for (var i = 0; i < SAMPLES.length; i++) {
+      var d = haversine(lat, lng, SAMPLES[i].lat, SAMPLES[i].lng);
+      if (d < minDist) minDist = d;
+      if (d < 30) countNear++;
+    }
+
+    // 2. Distance-based confidence (exponential decay)
+    var distConf = Math.exp(-minDist / 20) * 100; // 20km half-life
+
+    // 3. Density bonus: more nearby samples = more reliable
+    var densityBonus = Math.min(countNear * 5, 25); // max +25%
+
+    // 4. Basin penalty: outside basin = 0
+    if (!isInsideBasin(lat, lng)) {
+      return { pct: 0, label: 'Outside Study Area', color: '#ef4444' };
+    }
+
+    var pct = Math.min(Math.round(distConf + densityBonus), 98); // cap at 98%
+    if (pct < 0) pct = 0;
+
+    var label, color;
+    if (pct >= 80) { label = 'High Confidence'; color = '#22c55e'; }
+    else if (pct >= 55) { label = 'Moderate'; color = '#eab308'; }
+    else if (pct >= 30) { label = 'Low — Sparse Data'; color = '#f97316'; }
+    else { label = 'Very Low — Extrapolation'; color = '#ef4444'; }
+
+    return { pct: pct, label: label, color: color, nearest: minDist, count: countNear };
+  }
+
+  function calculateVelocity(props, season) {
+    var baseV = 0.5;
+    if (season === 'monsoon') baseV = 1.5;
+    if (props && props.DIS_AV_CMS) baseV *= Math.pow(props.DIS_AV_CMS / 50, 0.2);
+    return baseV;
+  }
+
+  /* ===========================================================
+   *  PREDICTION MODEL
+   * =========================================================== */
+
+  function predictElement(el, lat, lng, season, props, isGroundwater) {
+    // Inverse Distance Weighting interpolation baseline
+    var idwBase = SAMPLES.length > 0 ? getIDW(lat, lng, el) : 1000;
+    if (isNaN(idwBase) || idwBase < 0.1) idwBase = 1000;
+
+    // Fetch dynamic weights
+    var W1 = parseFloat(document.getElementById('w1').value) || 1.0;
+    var W2 = parseFloat(document.getElementById('w2').value) || 1.0;
+    var W3 = parseFloat(document.getElementById('w3').value) || 1.0;
+    var W4 = parseFloat(document.getElementById('w4').value) || 1.0;
+
+    var lithology = props ? props.LITHOLOGY : 'Unknown';
+    if (!lithology && rawGeologyData && isGroundwater) {
+      lithology = props.LITHOLOGY || 'Unknown';
+    }
+
+    // Lithology factor (W1) — LITHOLOGY_TABLE[lith] is a per-element object
+    var lithEntry = LITHOLOGY_TABLE[lithology];
+    var P_lith = (lithEntry && lithEntry[el] !== undefined) ? lithEntry[el] : 1.0;
+
+    // Residence / Sorption (W2 & W3)
+    var v, kd_eff, P_res, P_sorp;
+    var lambda_el = (LAMBDA[el] !== undefined) ? LAMBDA[el] : 1.0;
+    if (isGroundwater) {
+      // Groundwater mode: velocity is effectively 0, residence time is massive, sorption dominates
+      v = 0.001;
+      kd_eff = (KD[el] || 1.0);
+      P_res = 1.0; // Residence time drops out for static well
+      P_sorp = Math.log10(10 + kd_eff * (0.01)) * W3; 
+    } else {
+      // Surface river mode
+      v = calculateVelocity(props, season);
+      kd_eff = (KD[el] || 1.0) * (season === 'monsoon' ? 5.0 : 1.0); // turbidity
+      P_res = Math.exp(-lambda_el * v) * W2;
+      P_sorp = Math.log10(10 + kd_eff * (1/v)) * W3;
+    }
+
+    // Redox / Seasonality (W4)
+    var T_eff = (season === 'pre-monsoon') ? 20 : (season === 'monsoon' ? 15 : 10);
+    var red_eff = REDOX[el] || 1.0;
+    if (isGroundwater) T_eff = 12; // stable GW temp
+    var P_redox = (red_eff * Math.exp(-0.05 * T_eff)) * W4;
+
+    var logAdditiveMultiplier = (P_lith * W1) + P_res + P_sorp + P_redox;
+    if (logAdditiveMultiplier < 0.1) logAdditiveMultiplier = 0.1;
+    
+    var finalPredicted = idwBase * logAdditiveMultiplier;
+
+    return {
+      predicted: finalPredicted,
+      idwBase: idwBase,
+      factors: [
+        { name: "F1: Lithology",       val: P_lith * W1 },
+        { name: "F2: Kinetics",        val: P_res },
+        { name: "F3: Sorption/Clay",   val: P_sorp },
+        { name: "F4: Redox & Season",  val: P_redox }
+      ]
+    };
+  }
+
+  function predictAll(lat, lng, season, props, isGroundwater) {
+    var results = {};
+    for (var i = 0; i < ELEMENTS.length; i++) {
+      results[ELEMENTS[i]] = predictElement(ELEMENTS[i], lat, lng, season, props, isGroundwater);
+    }
+    return results;
+  }
+
+  /** Concentration → color class */
+  function concColor(value, element) {
+    var ratio = value / WHO_LIMITS[element];
+    if (ratio < 0.10) return 'green';
+    if (ratio < 0.30) return 'green';
+    if (ratio < 0.70) return 'yellow';
+    if (ratio < 1.00) return 'orange';
+    return 'red';
+  }
+
+  /** Concentration → hex color for map lines (smooth scientific gradient) */
+  function concHex(value, element) {
+    var ratio = value / WHO_LIMITS[element];
+    if (ratio < 0.05) return '#2563eb';  // Deep blue — pristine
+    if (ratio < 0.15) return '#06b6d4';  // Cyan — very clean
+    if (ratio < 0.30) return '#22c55e';  // Green — safe
+    if (ratio < 0.50) return '#84cc16';  // Lime — moderate
+    if (ratio < 0.70) return '#eab308';  // Yellow — attention
+    if (ratio < 0.85) return '#f97316';  // Orange — elevated
+    if (ratio < 1.00) return '#ef4444';  // Red — near limit
+    return '#dc2626';                     // Dark red — exceeds WHO
+  }
+
+  /* ===========================================================
+   *  INIT MAP & PRELOAD
+   * =========================================================== */
+  function initMap() {
+    map = L.map('map').setView([30.5, 79.2], 9);
+    // Minimal basemap with place names
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap &copy; CARTO'
+    }).addTo(map);
+
+    // 2D Basin-wide click handler
+    map.on('click', handleMapClick);
+
+    // Pre-load geology layer for Turf.js Point-in-Polygon checks
+    fetch('geology_layer.geojson')
+      .then(function(res) { return res.ok ? res.json() : null; })
+      .then(function(data) {
+        if (data) rawGeologyData = data;
+      }).catch(function(err) {
+        console.warn('Could not pre-load geology data:', err);
+      });
+  }
+
+  function handleMapClick(e) {
+    var lat = e.latlng.lat;
+    var lng = e.latlng.lng;
+
+    // Basin boundary check
+    if (!isInsideBasin(lat, lng)) {
+      showStatus('error', '⛔ Outside the Alaknanda-Ganga study area. Predictions are localized to this basin only.');
+      return;
+    }
+    runGroundwaterPrediction(lat, lng);
+  }
+
+  function runGroundwaterPrediction(lat, lng) {
+    var foundLith = 'Alluvium';
+    // Try Turf.js point-in-polygon if geology data is available
+    if (rawGeologyData && typeof turf !== 'undefined') {
+      for (var i = 0; i < rawGeologyData.features.length; i++) {
+        var feat = rawGeologyData.features[i];
+        var gtype = feat.geometry.type;
+        if (gtype === 'Polygon' || gtype === 'MultiPolygon') {
+          try {
+            if (turf.booleanPointInPolygon(turf.point([lng, lat]), feat)) {
+              foundLith = feat.properties.LITHOLOGY || 'Alluvium';
+              break;
+            }
+          } catch(err) { /* skip invalid geometry */ }
+        }
+      }
+    }
+    // Estimate elevation from latitude gradient
+    var elevEst = Math.max(400, Math.round(4000 - ((31.0 - lat) * 3500)));
+    var mockProps = {
+      IS_GROUNDWATER: true,
+      LITHOLOGY: foundLith,
+      ELEV_EST: elevEst
+    };
+    selectedSegmentLatLng = L.latLng(lat, lng);
+    selectedSegmentProps = mockProps;
+    document.getElementById('segment-panel').classList.remove('visible');
+    var season = document.getElementById('sel-season').value;
+    showPredictionPanel(lat, lng, 'Groundwater Profile (' + foundLith + ')', mockProps, season, true);
+
+    // Drop a temporary marker
+    if (window._gwMarker) map.removeLayer(window._gwMarker);
+    window._gwMarker = L.circleMarker([lat, lng], {
+      radius: 10, fillColor: '#f59e0b', fillOpacity: 0.9,
+      color: '#fff', weight: 2
+    }).addTo(map);
+    window._gwMarker.bindTooltip('Query: ' + lat.toFixed(3) + ', ' + lng.toFixed(3), {permanent: false, direction: 'top'});
+  }
+
+  function addSampleMarkers() {
+    // Remove old markers if any
+    for(var j=0; j<sampleMarkers.length; j++) {
+      map.removeLayer(sampleMarkers[j]);
+    }
+    sampleMarkers = [];
+    
+    for (var i = 0; i < SAMPLES.length; i++) {
+      var s = SAMPLES[i];
+      var marker = L.circleMarker([s.lat, s.lng], {
+        radius: 8, fillColor: '#38bdf8', fillOpacity: 0.9,
+        color: '#0f172a', weight: 2
+      }).addTo(map);
+      marker.bindTooltip(s.name, { permanent: false, direction: 'top', className: '' });
+      (function(sample) {
+        marker.on('click', function() {
+          showSamplePrediction(sample);
+        });
+      })(s);
+      sampleMarkers.push(marker);
+    }
+  }
+
+  /** Show prediction for a sample point (no GeoJSON props, use waypoint-derived) */
+  function showSamplePrediction(sample) {
+    var nw = nearestWaypoint(sample.lat, sample.lng);
+    var wp = nw.waypoint;
+    // Synthesize props from nearest waypoint
+    var props = {
+      ORD_STRA: wp.order,
+      DIS_AV_CMS: 10 + wp.order * 8,
+      DIST_UP_KM: wp.dist,
+      DIST_DN_KM: Math.max(0, 195 - wp.dist),
+      CATCH_SKM: 50 + wp.order * 30,
+      UPLAND_SKM: 100 + wp.dist * 10,
+      LITHOLOGY: wp.lith,
+      LENGTH_KM: 10,
+      HYRIV_ID: '—'
+    };
+    var season = document.getElementById('sel-season').value;
+    showPredictionPanel(sample.lat, sample.lng, sample.name, props, season);
+  }
+
+  /* ===========================================================
+   *  GEOJSON HANDLING
+   * =========================================================== */
+  function loadGeoJSON(data) {
+    try {
+      geojsonData = (typeof data === 'string') ? JSON.parse(data) : data;
+    } catch (e) {
+      showStatus('error', 'Invalid JSON: ' + e.message);
+      return;
+    }
+
+    if (!geojsonData.features || !geojsonData.features.length) {
+      showStatus('error', 'No features found in GeoJSON.');
+      return;
+    }
+
+    // Remove old layer
+    if (geoLayer) { map.removeLayer(geoLayer); geoLayer = null; }
+
+    var element = document.getElementById('sel-element').value;
+    var season  = document.getElementById('sel-season').value;
+
+    geoLayer = L.geoJSON(geojsonData, {
+      style: function(feature) {
+        return styleFeature(feature, element, season);
+      },
+      onEachFeature: function(feature, layer) {
+        layer.on('click', function(e) {
+          // Stop propagation so map.on('click') groundwater handler does NOT fire
+          L.DomEvent.stopPropagation(e);
+          onSegmentClick(feature, e.latlng);
+        });
+        layer.on('mouseover', function() {
+          layer.setStyle({ weight: 5, opacity: 1 });
+          layer.bringToFront();
+        });
+        layer.on('mouseout', function() {
+          geoLayer.resetStyle(layer);
+        });
+      }
+    }).addTo(map);
+
+    // Fit to bounds
+    try { map.fitBounds(geoLayer.getBounds().pad(0.1)); } catch(e) {}
+
+    showStatus('success', geojsonData.features.length + ' river segments loaded.');
+    showLegend(element);
+  }
+
+  /** Style a single feature based on predicted concentration */
+  function styleFeature(feature, element, season) {
+    var props = feature.properties || {};
+    var mid = featureMidpoint(feature);
+    if (!mid) return { color: '#64748b', weight: 2, opacity: 0.6 };
+
+    // Signature: predictElement(el, lat, lng, season, props, isGroundwater)
+    var result = predictElement(element, mid.lat, mid.lng, season, props, false);
+    var color = concHex(result.predicted, element);
+    var order = props.ORD_STRA || 2;
+    var w = Math.max(1.5, Math.min(order * 0.8, 6));
+
+    return { color: color, weight: w, opacity: 0.85, lineJoin: 'round', lineCap: 'round' };
+  }
+
+  /** Re-color all segments when element or season changes */
+  function recolorSegments() {
+    if (!geoLayer || !geojsonData) return;
+    var element = document.getElementById('sel-element').value;
+    var season  = document.getElementById('sel-season').value;
+
+    geoLayer.eachLayer(function(layer) {
+      if (layer.feature) {
+        var s = styleFeature(layer.feature, element, season);
+        layer.setStyle(s);
+      }
+    });
+    showLegend(element);
+  }
+
+  /** Handle click on a river segment */
+  function onSegmentClick(feature, latlng) {
+    var props = feature.properties || {};
+    var season = document.getElementById('sel-season').value;
+
+    // Find a name
+    var nw = nearestWaypoint(latlng.lat, latlng.lng);
+    var locName = (nw.distance < 10) ? 'Near ' + nw.waypoint.name : 'Segment #' + (props.HYRIV_ID || '?');
+
+    // Show segment properties panel
+    showSegmentPanel(props);
+
+    // Show prediction panel
+    showPredictionPanel(latlng.lat, latlng.lng, locName, props, season);
+
+    selectedSegmentProps = props;
+    selectedSegmentLatLng = latlng;
+  }
+
+  /* ===========================================================
+   *  UI: SEGMENT PROPERTIES PANEL
+   * =========================================================== */
+  function showSegmentPanel(props) {
+    var grid = document.getElementById('prop-grid');
+    // Standard known fields
+    var items = [
+      { k: 'River ID',        v: props.HYRIV_ID || '—' },
+      { k: 'Lithology',       v: props.LITHOLOGY || '—' },
+      { k: 'Stream Order',    v: props.ORD_STRA || '—' },
+      { k: 'Discharge',       v: props.DIS_AV_CMS ? fmt(props.DIS_AV_CMS, 2) + ' m³/s' : '—' },
+      { k: 'Length',          v: props.LENGTH_KM ? fmt(props.LENGTH_KM, 1) + ' km' : '—' },
+      { k: 'Catchment',       v: props.CATCH_SKM ? fmt(props.CATCH_SKM, 1) + ' km²' : '—' },
+      { k: 'Upland Area',     v: props.UPLAND_SKM ? fmt(props.UPLAND_SKM, 1) + ' km²' : '—' },
+      { k: 'Topology Elev.',  v: props.ELEV_EST ? Math.round(props.ELEV_EST) + ' m' : '—' },
+      { k: 'Topo Gradient',   v: props.GRADIENT ? fmt(props.GRADIENT, 4) : '—' },
+      { k: 'Net Dist. Sink',  v: (props.NET_DIST_TO_SINK !== undefined && props.NET_DIST_TO_SINK >= 0) ? fmt(props.NET_DIST_TO_SINK, 1) + ' km' : 'Disconnected' },
+      { k: 'Dist Upstream',   v: props.DIST_UP_KM ? fmt(props.DIST_UP_KM, 1) + ' km' : '—' },
+      { k: 'Dist Downstream', v: props.DIST_DN_KM ? fmt(props.DIST_DN_KM, 1) + ' km' : '—' },
+      { k: 'Next Downstream', v: props.NEXT_DOWN || '—' }
+    ];
+
+    // Dynamically add any extra properties from the GeoJSON that we haven't already shown
+    var knownKeys = ['HYRIV_ID','LITHOLOGY','ORD_STRA','DIS_AV_CMS','LENGTH_KM','CATCH_SKM',
+      'UPLAND_SKM','ELEV_EST','GRADIENT','NET_DIST_TO_SINK','DIST_UP_KM','DIST_DN_KM','NEXT_DOWN'];
+    for (var key in props) {
+      if (props.hasOwnProperty(key) && knownKeys.indexOf(key) === -1) {
+        var val = props[key];
+        if (val !== null && val !== undefined && val !== '') {
+          items.push({ k: key, v: (typeof val === 'number') ? fmt(val, 2) : String(val) });
+        }
+      }
+    }
+
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+      html += '<div class="prop-card"><div class="pk">' + items[i].k + '</div><div class="pv">' + items[i].v + '</div></div>';
+    }
+    grid.innerHTML = html;
+    document.getElementById('segment-panel').classList.add('visible');
+  }
+
+  /* ===========================================================
+   *  UI: PREDICTION PANEL
+   * =========================================================== */
+  function showPredictionPanel(lat, lng, locName, props, season, isGroundwater) {
+    var results = predictAll(lat, lng, season, props, isGroundwater);
+    var element = document.getElementById('sel-element').value;
+    var conf = computeConfidence(lat, lng);
+
+    // Location info
+    var elev = 1500;
+    if (props && props.DIST_UP_KM) elev = clamp(4000 - (props.DIST_UP_KM * 15), 300, 4500);
+    else if (props && props.ELEV_EST) elev = props.ELEV_EST;
+
+    var locInfo = document.getElementById('loc-info');
+    var subtitle = isGroundwater ? '<span>🚰 Groundwater/Soil Profile</span>' : '<span>🔀 River Order ' + (props.ORD_STRA || '?') + '</span>';
+    
+    // Confidence bar HTML
+    var confHtml = '<div style="margin-top:8px;padding:8px 10px;background:rgba(0,0,0,0.25);border-radius:8px;border-left:3px solid ' + conf.color + ';">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">' +
+        '<span style="font-size:11px;color:#94a3b8;font-weight:600;">PREDICTION CONFIDENCE</span>' +
+        '<span style="font-size:13px;font-weight:700;color:' + conf.color + ';">' + conf.pct + '%</span>' +
+      '</div>' +
+      '<div style="width:100%;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">' +
+        '<div style="width:' + conf.pct + '%;height:100%;background:' + conf.color + ';border-radius:3px;transition:width 0.4s;"></div>' +
+      '</div>' +
+      '<div style="font-size:10px;color:' + conf.color + ';margin-top:4px;">' + conf.label;
+    if (conf.nearest !== undefined) {
+      confHtml += ' — Nearest sample: ' + fmt(conf.nearest, 1) + ' km (' + conf.count + ' within 30 km)';
+    }
+    confHtml += '</div></div>';
+
+    locInfo.innerHTML =
+      '<div class="loc-name">' + locName + '</div>' +
+      '<div class="loc-meta">' +
+        '<span>📍 ' + lat.toFixed(4) + '°N, ' + lng.toFixed(4) + '°E</span>' +
+        '<span>⛰️ ~' + Math.round(elev) + 'm</span>' +
+        subtitle +
+      '</div>' + confHtml;
+
+    // Element grid
+    var gridEl = document.getElementById('elem-grid');
+    var gridHtml = '';
+    for (var i = 0; i < ELEMENTS.length; i++) {
+      var el = ELEMENTS[i];
+      var pred = results[el].predicted;
+      var cc = concColor(pred, el);
+      var sel = (el === element) ? ' selected' : '';
+      gridHtml += '<div class="elem-card ' + cc + sel + '" data-el="' + el + '">' +
+        '<div class="sym">' + el + '</div>' +
+        '<div class="cval">' + fmt(pred, (pred < 100 ? 2 : 0)) + '</div>' +
+        '<div class="unit">µg/L</div></div>';
+    }
+    gridEl.innerHTML = gridHtml;
+
+    // Bind clicks on element cards to show that element's factor breakdown
+    var cards = gridEl.querySelectorAll('.elem-card');
+    for (var j = 0; j < cards.length; j++) {
+      (function(card) {
+        card.addEventListener('click', function() {
+          var el = card.getAttribute('data-el');
+          document.getElementById('sel-element').value = el;
+          showFactorBreakdown(results[el]);
+          // Update selected highlight
+          var allCards = gridEl.querySelectorAll('.elem-card');
+          for (var k = 0; k < allCards.length; k++) allCards[k].classList.remove('selected');
+          card.classList.add('selected');
+          recolorSegments();
+        });
+      })(cards[j]);
+    }
+
+    // Show factor breakdown for the currently selected element
+    showFactorBreakdown(results[element]);
+
+    // Show panel, position it
+    var panel = document.getElementById('prediction-panel');
+    var segPanel = document.getElementById('segment-panel');
+    if (segPanel.classList.contains('visible')) {
+      // Stack below segment panel
+      panel.style.top = (segPanel.offsetHeight + 28) + 'px';
+    } else {
+      panel.style.top = '14px';
+    }
+    panel.classList.add('visible');
+  }
+
+  /** Factor breakdown list */
+  function showFactorBreakdown(result) {
+    var list = document.getElementById('factor-list');
+    var html = '';
+
+    // IDW Base row
+    html += '<div class="factor-row">' +
+      '<div class="fn">IDW Baseline</div>' +
+      '<div class="fv">' + fmt(result.idwBase, 1) + ' µg/L</div>' +
+      '<div class="fe" style="color:#94a3b8">→</div></div>';
+
+    // Factor rows
+    for (var i = 0; i < result.factors.length; i++) {
+      var f = result.factors[i];
+      var val = f.val;
+      var arrow = val > 1.05 ? '↑' : (val < 0.95 ? '↓' : '→');
+      var effClass = arrow === '↑' ? 'color:#4ade80' : (arrow === '↓' ? 'color:#f87171' : 'color:#94a3b8');
+      html += '<div class="factor-row">' +
+        '<div class="fn">' + f.name + '</div>' +
+        '<div class="fv">' + fmt(val, 4) + '</div>' +
+        '<div class="fe" style="' + effClass + '">' + arrow + '</div></div>';
+    }
+
+    // Total multiplier row
+    var totalM = 0;
+    for (var j = 0; j < result.factors.length; j++) totalM += result.factors[j].val;
+    html += '<div class="factor-row" style="border-top:1px solid rgba(255,255,255,0.08);padding-top:8px;margin-top:4px;">' +
+      '<div class="fn" style="font-weight:700;color:#e2e8f0;">Σ Multiplier (M)</div>' +
+      '<div class="fv" style="color:#38bdf8;">' + fmt(totalM, 4) + '</div>' +
+      '<div class="fe"></div></div>';
+
+    // Final predicted
+    html += '<div class="factor-row" style="margin-top:2px;">' +
+      '<div class="fn" style="font-weight:700;color:#f59e0b;">C_predicted</div>' +
+      '<div class="fv" style="color:#f59e0b;font-weight:700;">' + fmt(result.predicted, 1) + ' µg/L</div>' +
+      '<div class="fe"></div></div>';
+
+    list.innerHTML = html;
+  }
+
+  /* ===========================================================
+   *  UI: LEGEND
+   * =========================================================== */
+  function showLegend(element) {
+    var el = document.getElementById('map-legend');
+    document.getElementById('legend-title').textContent = element + ' Concentration (% of WHO limit)';
+    el.classList.add('visible');
+  }
+
+  /* ===========================================================
+   *  UI: STATUS MESSAGES
+   * =========================================================== */
+  function showStatus(type, msg) {
+    var el = document.getElementById('status-msg');
+    el.className = 'status-msg ' + type;
+    var icons = { success: '✅', error: '❌', info: 'ℹ️' };
+    el.innerHTML = (icons[type] || '') + ' ' + msg;
+  }
+
+  /* ===========================================================
+   *  UI: LOADING OVERLAY
+   * =========================================================== */
+  function showLoading(show) {
+    document.getElementById('loading-overlay').classList.toggle('visible', show);
+  }
+
+  /* ===========================================================
+   *  UI: SAMPLE LIST
+   * =========================================================== */
+  function buildSampleList() {
+    var ul = document.getElementById('sample-list');
+    var element = document.getElementById('sel-element').value;
+    var html = '';
+    for (var i = 0; i < SAMPLES.length; i++) {
+      var s = SAMPLES[i];
+      html += '<li>' + s.name + '<br><span class="val">' + element + ': ' +
+        fmt(s.data[element], 1) + ' µg/L | Elev: ' + s.elev + 'm</span></li>';
+    }
+    ul.innerHTML = html;
+  }
+
+  /* ===========================================================
+   *  CSV PARSING
+   * =========================================================== */
+  function parseCSV(text) {
+    var lines = text.split(/\r?\n/);
+    if (lines.length < 2) {
+      showStatus('error', 'CSV is empty or too short.');
+      return;
+    }
+    
+    var headers = lines[0].split(',').map(function(h) { return h.trim(); });
+    var newSamplesCount = 0;
+
+    for (var i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      var cols = lines[i].split(',').map(function(c) { return c.trim(); });
+      
+      var sample = { name: 'Unknown', lat: 0, lng: 0, elev: 1000, data: {} };
+      
+      for (var j = 0; j < headers.length; j++) {
+        var h = headers[j];
+        var val = cols[j] ? parseFloat(cols[j]) : 0;
+        
+        if (h === 'Name') sample.name = cols[j] || 'Sample ' + i;
+        else if (h === 'Lat') sample.lat = val;
+        else if (h === 'Lng') sample.lng = val;
+        else if (h === 'Elev') sample.elev = val;
+        else if (ELEMENTS.indexOf(h) !== -1) {
+          sample.data[h] = isNaN(val) ? 0 : val;
+        }
+      }
+      
+      if (sample.lat !== 0 && sample.lng !== 0) {
+        SAMPLES.push(sample);
+        newSamplesCount++;
+      }
+    }
+    
+    if (newSamplesCount > 0) {
+      showStatus('success', 'Loaded ' + newSamplesCount + ' custom samples!');
+      addSampleMarkers();
+      buildSampleList();
+      recolorSegments(); // Immediately apply IDW pull to map
+    } else {
+      showStatus('error', 'No valid coordinates found in CSV.');
+    }
+  }
+
+  /* ===========================================================
+   *  EVENT BINDINGS
+   * =========================================================== */
+  function bindEvents() {
+    // Element / Season change → recolor + update sample list
+    document.getElementById('sel-element').addEventListener('change', function() {
+      recolorSegments();
+      buildSampleList();
+      // If prediction panel is open, re-run prediction
+      if (selectedSegmentProps && selectedSegmentLatLng) {
+        var season = document.getElementById('sel-season').value;
+        var isGW = !!selectedSegmentProps.IS_GROUNDWATER;
+        var locName = isGW ? 'Groundwater Node' : 'Segment #' + (selectedSegmentProps.HYRIV_ID || '?');
+        showPredictionPanel(selectedSegmentLatLng.lat, selectedSegmentLatLng.lng, locName, selectedSegmentProps, season, isGW);
+      }
+    });
+    document.getElementById('sel-season').addEventListener('change', function() {
+      recolorSegments();
+      // If prediction panel is open, re-run
+      if (selectedSegmentProps && selectedSegmentLatLng) {
+        var season = document.getElementById('sel-season').value;
+        var isGW = !!selectedSegmentProps.IS_GROUNDWATER;
+        var locName = isGW ? 'Groundwater Node' : 'Segment #' + (selectedSegmentProps.HYRIV_ID || '?');
+        showPredictionPanel(selectedSegmentLatLng.lat, selectedSegmentLatLng.lng, locName, selectedSegmentProps, season, isGW);
+      }
+    });
+
+    var geojsonInput = document.getElementById('geojson-input');
+    if (geojsonInput) {
+      geojsonInput.addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        handleFile(file);
+      });
+    }
+
+    var csvInput = document.getElementById('csv-input');
+    if (csvInput) {
+      csvInput.addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        showLoading(true);
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+          parseCSV(ev.target.result);
+          showLoading(false);
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    // Close panels
+    document.getElementById('seg-close').addEventListener('click', function() {
+      document.getElementById('segment-panel').classList.remove('visible');
+      // Reposition prediction panel
+      document.getElementById('prediction-panel').style.top = '14px';
+    });
+    document.getElementById('pred-close').addEventListener('click', function() {
+      document.getElementById('prediction-panel').classList.remove('visible');
+      selectedSegmentProps = null;
+      selectedSegmentLatLng = null;
+    });
+
+    // Factor toggle
+    document.getElementById('factor-toggle').addEventListener('click', function() {
+      this.classList.toggle('open');
+      document.getElementById('factor-list').classList.toggle('open');
+    });
+  }
+
+  /** Read and parse uploaded GeoJSON file */
+  function handleFile(file) {
+    var name = file.name.toLowerCase();
+    if (!name.endsWith('.json') && !name.endsWith('.geojson')) {
+      showStatus('error', 'Please upload a .json or .geojson file.');
+      return;
+    }
+
+    showLoading(true);
+    showStatus('info', 'Reading ' + file.name + '…');
+
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        loadGeoJSON(e.target.result);
+      } catch (err) {
+        showStatus('error', 'Error processing file: ' + err.message);
+      }
+      showLoading(false);
+    };
+    reader.onerror = function() {
+      showStatus('error', 'Failed to read file.');
+      showLoading(false);
+    };
+    // Use setTimeout to allow the UI to paint the spinner before blocking on parse
+        setTimeout(function() { reader.readAsText(file); }, 50);
+  }
+
+  /* ===========================================================
+   *  GROUNDWATER MAP CLICK
+   * =========================================================== */
+  // Duplicate removed — unified in runGroundwaterPrediction()
+
+  /* ===========================================================
+   *  GEOLOGY LAYER LOGIC
+   * =========================================================== */
+  function getGeologyColor(lith) {
+    if (lith === 'Quartzite') return '#f59e0b';
+    if (lith === 'Gneiss') return '#ec4899';
+    if (lith === 'Slate') return '#8b5cf6';
+    if (lith === 'Phyllite') return '#10b981';
+    if (lith === 'Limestone' || lith === 'Dolomite') return '#3b82f6';
+    if (lith === 'Schist') return '#ef4444';
+    if (lith === 'Alluvium') return '#fef08a';
+    if (lith === 'Basalt') return '#334155';
+    return '#94a3b8';
+  }
+
+  function toggleGeologyLayer() {
+    var cb = document.getElementById('toggle-geology');
+    if (cb.checked) {
+      if (!geologyPolygonsLayer) {
+        showLoading(true);
+        fetch('geology_layer.geojson')
+          .then(function(res) { 
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json(); 
+          })
+          .then(function(data) {
+            geologyPolygonsLayer = L.geoJSON(data, {
+              style: function(feature) {
+                return {
+                  fillColor: getGeologyColor(feature.properties.LITHOLOGY),
+                  weight: 1,
+                  opacity: 0.5,
+                  color: '#ffffff',
+                  fillOpacity: 0.35
+                };
+              }
+            });
+            geologyPolygonsLayer.addTo(map);
+            geologyPolygonsLayer.bringToBack();
+            showLoading(false);
+          })
+          .catch(function(err) {
+            showStatus('error', 'Could not load geology. Did you run simplify_geology.py first?');
+            showLoading(false);
+            cb.checked = false;
+          });
+      } else {
+        geologyPolygonsLayer.addTo(map);
+        geologyPolygonsLayer.bringToBack();
+      }
+    } else {
+      if (geologyPolygonsLayer) {
+        map.removeLayer(geologyPolygonsLayer);
+      }
+    }
+  }
+
+  /* ===========================================================
+   *  BOOT
+   * =========================================================== */
+  window.addEventListener('DOMContentLoaded', function() {
+    initMap();
+    bindEvents();
+    buildSampleList();
+    if(document.getElementById('toggle-geology')) {
+      document.getElementById('toggle-geology').addEventListener('change', toggleGeologyLayer);
+    }
+
+    // Weight slider live updates
+    var wIds = ['w1', 'w2', 'w3', 'w4'];
+    for (var i=0; i<wIds.length; i++) {
+      var el = document.getElementById(wIds[i]);
+      if (el) {
+        el.addEventListener('input', function(e) {
+          document.getElementById('val-' + e.target.id).textContent = parseFloat(e.target.value).toFixed(1);
+          if (geojsonData && geoLayer) {
+            recolorSegments();
+          }
+          if (selectedSegmentProps && selectedSegmentLatLng) {
+            var season = document.getElementById('sel-season').value;
+            var isGW = !!selectedSegmentProps.IS_GROUNDWATER;
+            if (isGW) {
+              runGroundwaterPrediction(selectedSegmentLatLng.lat, selectedSegmentLatLng.lng);
+            } else {
+              var nw = nearestWaypoint(selectedSegmentLatLng.lat, selectedSegmentLatLng.lng);
+              var locName = (nw.distance < 10) ? 'Near ' + nw.waypoint.name : 'Segment #' + (selectedSegmentProps.HYRIV_ID || '?');
+              showPredictionPanel(selectedSegmentLatLng.lat, selectedSegmentLatLng.lng, locName, selectedSegmentProps, season, false);
+            }
+          }
+        });
+      }
+    }
+
+    // Coordinate Lookup button
+    document.getElementById('btn-lookup').addEventListener('click', function() {
+      var lat = parseFloat(document.getElementById('lookup-lat').value);
+      var lng = parseFloat(document.getElementById('lookup-lng').value);
+      if (isNaN(lat) || isNaN(lng)) {
+        showStatus('error', 'Please enter valid Latitude and Longitude.');
+        return;
+      }
+      if (!isInsideBasin(lat, lng)) {
+        showStatus('error', '⛔ Coordinate is outside the Alaknanda-Ganga study area.');
+        return;
+      }
+      map.setView([lat, lng], 12);
+      runGroundwaterPrediction(lat, lng);
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
